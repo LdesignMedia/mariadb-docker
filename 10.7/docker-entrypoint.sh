@@ -331,6 +331,72 @@ docker_setup_db() {
 	fi
 }
 
+# backup the mysql database - use $1 = version
+docker_mariadb_backup_system()
+{
+	local newversion=(${1//./ })
+	local oldfullversion=
+	local backup_db="system_mysql_backup_unknown_version.sql.zst"
+	if [ -r "$DATADIR"/mysql_upgrade_info ]; then
+		oldfullversion=$(<"$DATADIR"/mysql_upgrade_info)
+		backup_db="system_mysql_backup_${oldfullversion}.sql.zst"
+	fi
+	local oldversion=(${oldfullversion//./ })
+
+	if [[ ${#newversion[@]} -lt 2 ]] || [[ ${#oldversion[@]} -lt 2 ]] \
+		|| [[ ${oldversion[0]} -lt ${newversion[0]} ]] \
+		|| [[ ${oldversion[0]} -eq ${newversion[0]} && ${oldversion[1]} -lt ${newversion[1]} ]]; then
+		mysql_note "Backing up system database to $backup_db"
+		if ! MYSQL_PWD=$MARIADB_ROOT_PASSWORD mariadb-dump --user=root --skip-lock-tables --replace --databases mysql --socket="${SOCKET}" | zstd > "${DATADIR}/${backup_db}"; then
+			mysql_error "Unable backup system database for upgrade from $oldfullversion."
+		fi
+		mysql_note "Backing up complete"
+	else
+		mysql_note "Skipping mariadb-upgrade backup, not a major upgrade"
+	fi
+}
+
+# perform mariadb-upgrade
+# backup the mysql database if this is a major upgrade
+docker_mariadb_upgrade() {
+	if [ -z "$MARIADB_AUTO_UPGRADE" ] \
+		|| [ "$MARIADB_AUTO_UPGRADE" = 0 ] \
+		|| [ -z "$DATABASE_ALREADY_EXISTS" ]; then
+		return 0
+	fi
+	if [ -r "$DATADIR"/mysql_upgrade_info ]; then
+		local version=$(<"$DATADIR"/mysql_upgrade_info)
+		# De-debian-affing the version number
+		local currentVersion=$MARIADB_VERSION
+		currentVersion=${currentVersion#*:}
+		currentVersion=${currentVersion%+*}
+		if [[ "$version" =~ ^$currentVersion ]]; then
+			mysql_note "Skipping mariadb-upgrade - current version $version detected"
+			return
+		fi
+	fi
+	(
+		local i
+		local v=
+		for i in {1..600}; do
+			if v=$(docker_process_sql --skip-column-names -Be 'select version()' 2> /dev/null); then
+				break
+			fi
+			sleep 1
+			if (( $i % 10  == 0 )); then
+				mysql_note "Have wanted $i seconds to connect to perform mariadb-upgrade"
+			fi
+		done
+		if [ -z "$v" ]; then
+			mysql_error "Unable to contact server to perform mariadb-upgrade."
+		fi
+		docker_mariadb_backup_system "$v"
+		mysql_note "Starting mariadb-upgrade"
+		MYSQL_PWD=$MARIADB_ROOT_PASSWORD mysql_upgrade
+		mysql_note "Finished mariadb-upgrade"
+	) &
+}
+
 # check arguments for an option that would cause mariadbd to stop
 # return true if there is one
 _mysql_want_help() {
@@ -365,6 +431,7 @@ _main() {
 			mysql_note "Switching to dedicated user 'mysql'"
 			exec gosu mysql "$BASH_SOURCE" "$@"
 		fi
+		docker_mariadb_upgrade
 
 		# there's no database, so it needs to be initialized
 		if [ -z "$DATABASE_ALREADY_EXISTS" ]; then
