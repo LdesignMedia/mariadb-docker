@@ -369,8 +369,17 @@ esac
 if [ -n "$debarch" ]
 then
 	echo -e "Test: jemalloc preload\n"
-	runandwait -e LD_PRELOAD="/usr/lib/$debarch-linux-gnu/libjemalloc.so.1 /usr/lib/$debarch-linux-gnu/libjemalloc.so.2" -e MARIADB_ALLOW_EMPTY_ROOT_PASSWORD=1 "${image}"
-	docker exec -i $cid gosu mysql /bin/grep 'jemalloc' /proc/1/maps || die "expected to preload jemalloc"
+	v=$(docker run --rm "${image}" sh -c 'echo ${MARIADB_MAJOR}')
+	case $v in
+		10.2)
+			l=/usr/lib/$debarch-linux-gnu/libjemalloc.so.1
+			;;
+		*)
+			l=/usr/lib/$debarch-linux-gnu/libjemalloc.so.2
+	esac
+	runandwait -e LD_PRELOAD="$l" -e MARIADB_ALLOW_EMPTY_ROOT_PASSWORD=1 "${image}"
+	docker logs $cid
+	docker exec -i --user mysql $cid /bin/grep 'jemalloc' /proc/1/maps || die "expected to preload jemalloc"
 
 
 	killoff
