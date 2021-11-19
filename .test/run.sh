@@ -102,7 +102,7 @@ mariadbclient -u root -e 'show databases'
 othertables=$(mariadbclient -u root --skip-column-names -Be "select group_concat(SCHEMA_NAME) from information_schema.SCHEMATA where SCHEMA_NAME not in ('mysql', 'information_schema', 'performance_schema', 'sys')")
 [ "${othertables}" != 'NULL' ] && die "unexpected table(s) $othertables"
 
-otherusers=$(mariadbclient -u root --skip-column-names -Be "select user,host from mysql.user where (user,host) not in (('root', 'localhost'), ('root', '%'), ('mariadb.sys', 'localhost'))")
+otherusers=$(mariadbclient -u root --skip-column-names -Be "select user,host from mysql.user where (user,host) not in (('root', 'localhost'), ('root', '%'), ('mariadb.sys', 'localhost'), ('mysql', 'localhost'))")
 [ "$otherusers" != '' ] && die "unexpected users $otherusers"
 killoff
 

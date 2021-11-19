@@ -302,6 +302,8 @@ docker_setup_db() {
 		-- 10.5: https://github.com/MariaDB/server/blob/00c3a28820c67c37ebbca72691f4897b57f2eed5/scripts/mysql_secure_installation.sh#L351-L369
 		DELETE FROM mysql.db WHERE Db='test' OR Db='test\_%' ;
 
+		CREATE USER mysql@localhost IDENTIFIED VIA unix_socket;
+		GRANT ALL ON *.* TO mysql@localhost;
 		GRANT ALL ON *.* TO 'root'@'localhost' WITH GRANT OPTION ;
 		FLUSH PRIVILEGES ;
 		${rootCreate}
@@ -347,7 +349,7 @@ docker_mariadb_backup_system()
 		|| [[ ${oldversion[0]} -lt ${newversion[0]} ]] \
 		|| [[ ${oldversion[0]} -eq ${newversion[0]} && ${oldversion[1]} -lt ${newversion[1]} ]]; then
 		mysql_note "Backing up system database to $backup_db"
-		if ! MYSQL_PWD=$MARIADB_ROOT_PASSWORD mysqldump --user=root --skip-lock-tables --replace --databases mysql --socket="${SOCKET}" | zstd > "${DATADIR}/${backup_db}"; then
+		if ! mysqldump --user=mysql --skip-lock-tables --replace --databases mysql --socket="${SOCKET}" | zstd > "${DATADIR}/${backup_db}"; then
 			mysql_error "Unable backup system database for upgrade from $oldfullversion."
 		fi
 		mysql_note "Backing up complete"
@@ -379,7 +381,7 @@ docker_mariadb_upgrade() {
 		local i
 		local v=
 		for i in {1..600}; do
-			if v=$(docker_process_sql --skip-column-names -Be 'select version()' 2> /dev/null); then
+			if v=$(docker_process_sql --user mysql --skip-column-names -Be 'select version()' 2> /dev/null); then
 				break
 			fi
 			sleep 1
@@ -392,7 +394,7 @@ docker_mariadb_upgrade() {
 		fi
 		docker_mariadb_backup_system "$v"
 		mysql_note "Starting mariadb-upgrade"
-		MYSQL_PWD=$MARIADB_ROOT_PASSWORD mysql_upgrade
+		mysql_upgrade --user mysql
 		mysql_note "Finished mariadb-upgrade"
 	) &
 }
