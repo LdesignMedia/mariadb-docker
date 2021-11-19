@@ -233,7 +233,7 @@ runandwait \
 	"${image}" 
 
 init_sum=$(mariadbclient --skip-column-names -B -u ron -pscappers -P 3306 -h 127.0.0.1  --protocol tcp titan -e "select sum(i) from t1;")
-[ "${init_sum}" = '1833' ] || (podman logs m_init; die 'initialization order error')
+[ "${init_sum}" = '1833' ] || (docker logs m_init; die 'initialization order error')
 killoff
 rm -rf "${initdb}"
 
@@ -378,9 +378,38 @@ else
 	echo -e "Test: jemalloc skipped - unknown arch '$architecture'\n"
 fi
 
+	;&
+	mariadb-upgrade)
+	echo -e "Test: mariadb-upgrade\n"
+
+	# Populate db101 with a 10.1 data dir.
+	docker volume rm db101 || docker volume create db101
+	# 10.1 is a bit slower to start. Pull first to avoid that in the startup time.
+	docker pull mariadb:10.1
+	DOCKER_LIBRARY_START_TIMEOUT=25 runandwait -v db101:/var/lib/mysql -e MYSQL_ROOT_PASSWORD=this_is_so_real mariadb:10.1
+	mariadbclient_unix -u root -pthis_is_so_real -e 'shutdown'
+	docker logs --tail 5 --follow $cid
+
+	runandwait -v db101:/var/lib/mysql -e MARIADB_ROOT_PASSWORD=this_is_so_real -e MARIADB_AUTO_UPGRADE=1 "${image}" --event_scheduler=1
+	# event scheduler data structure has changed a few times. It will autodisable on startup. mariadb-upgrade will re-enable this however
+
+	for i in {1..6}
+	do
+		if docker logs $cid 2>&1 | grep "Finished mariadb-upgrade"; then
+			break
+		fi
+		sleep 1
+	done
+	docker exec -i $cid ls -la /var/lib/mysql/system_mysql_backup_unknown_version.sql.zst || die "expected there to be a backup"
+	ev=$(mariadbclient --skip-column-names -B -u root -pthis_is_so_real -e 'select @@event_scheduler')
+	[[ $ev = 1 || $ev = ON ]] || die "expected event scheduler to be re-enabled"
+	killoff
+	docker volume rm db101
+
 # Insert new tests above by copying the comments below
 #	;&
 #	THE_TEST_NAME)
+#	echo -e "Test: THE_TEST_NAME preload\n"
 
 	;;
 	*)
