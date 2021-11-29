@@ -128,8 +128,8 @@ RUN set -ex; \
 	else sed -i -e '/includedir/ {N;s/\(.*\)\n\(.*\)/[mariadbd]\nskip-host-cache\nskip-name-resolve\n\n\2\n\1/}' \
                 /etc/mysql/mariadb.cnf; fi
 
-
-VOLUME /var/lib/mysql
+# Turn off volume mount
+#VOLUME /var/lib/mysql
 
 COPY docker-entrypoint.sh /usr/local/bin/
 ENTRYPOINT ["docker-entrypoint.sh"]
